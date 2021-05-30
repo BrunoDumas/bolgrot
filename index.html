@@ -1,0 +1,847 @@
+<!doctype html> 
+<html lang="en"> 
+<head> 
+    <meta charset="UTF-8" />
+    <title>Bolgrot</title>
+    <script src="//cdn.jsdelivr.net/npm/phaser@3.11.0/dist/phaser.js"></script>
+    <style type="text/css">
+        body {
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+
+<script type="text/javascript">
+class Bolgrot extends Phaser.Scene {
+    constructor () {
+        super();
+    }
+
+    preload () {
+        this.load.image('spark', 'assets/sprites/spark.png');
+        this.load.image('blue_flame', 'assets/sprites/blue_flame.png');
+        this.load.image('red_orb', 'assets/sprites/orb-red.png');
+        this.load.image('green_orb', 'assets/sprites/orb-green.png');
+        this.load.image('blue_orb', 'assets/sprites/orb-blue.png');
+        this.load.image('character', 'assets/sprites/character.png');
+		
+		this.load.atlas('cells', 'assets/atlas/cells.png', 'assets/atlas/cells.json');
+    }
+
+    create () {
+        //this.input.topOnly = true;
+
+        this.turnNumber = 1;
+        this.maxSpawnTurn = 6;
+        this.spawnsPerTurn = 6;
+        this.nbKills = 0;
+        
+        this.characterInfoText = this.add.text(10, 10, '', { font: '16px Courier', fill: '#00ff00' });
+		
+        this.gameInfoText = this.add.text(250, 10, '', { font: '16px Courier', fill: '#00ff00' });
+        this.gameStateText1 = this.add.text(450, 10, 'Bolgrot', { font: '22px Courier', fill: '#ff0000' });
+        this.gameStateText2 = this.add.text(450, 40, 'Extinguish all the flames by standing on it', { font: '16px Courier', fill: '#00ff00' });
+		
+		this.gameStateText1.on('pointerup', function () {
+			this.gameStateText1.disableInteractive();
+			this.gameStateText2.disableInteractive();
+			this.gameStateText1.setText('Bolgrot');
+			this.gameStateText2.setText('Extinguish all the flames by standing on it');
+			this.scene.restart();
+		}, this);
+		
+		this.gameStateText2.on('pointerup', function () {
+			this.gameStateText1.disableInteractive();
+			this.gameStateText2.disableInteractive();
+			this.gameStateText1.setText('Bolgrot');
+			this.gameStateText2.setText('Extinguish all the flames by standing on it');
+			this.scene.restart();
+		}, this);
+
+        this.flames = [];
+
+
+        // Create the grid
+        this.mapWidth = 32;
+        this.mapHeight = 31;
+
+        this.imgScale = 0.9;
+
+        this.tileWidthHalf = 20 * this.imgScale;
+        this.tileHeightHalf = 12 * this.imgScale;
+
+        this.centerX = (this.mapWidth / 2) * this.tileWidthHalf + 80;
+        this.centerY = -60;
+
+        this.blocks = [];
+
+        for (var y = 0; y < this.mapHeight; y++) {
+            for (var x = 0; x < this.mapWidth; x++) {
+                if ( ! this.cellExists(x, y) ) {
+                    continue;
+                }
+
+                var tx = (x - y) * this.tileWidthHalf;
+                var ty = (x + y) * this.tileHeightHalf;
+
+                var block = this.cellBaseColor(x, y);
+
+                var tile = this.add.image(this.centerX + tx, this.centerY + ty, 'cells', block + '-empty');
+                tile.setScale(this.imgScale);
+                tile.setDataEnabled();
+
+                tile.setData('row', x);
+                tile.setData('col', y);
+                tile.setData('content', null);
+
+                tile.setDepth(this.centerY + ty);
+                tile.setInteractive();
+                tile.on('pointerout', function (pointer) {
+                    this.clearTint();
+                });
+
+
+                tile.on('pointerover', function (pointer) {
+                    this.setTint(0x00cccc);
+                });
+
+                tile.on('pointerup', this.cellClickEventHandler(this));
+
+                this.blocks.push(tile);
+            }
+        }
+
+		this.characterStartingCoords = [16, 14];
+        
+        this.character = this.add.image(0, 0, 'character');
+		
+        this.character.setDepth(this.processDepth(this, this.characterStartingCoords) + 1000);
+        this.character.setDataEnabled();
+	
+        this.character.setData('health', 40);
+        this.character.setData('ap', 10);
+        this.character.setData('baseAp', 10);
+        this.character.setData('row', this.characterStartingCoords[0]);
+        this.character.setData('col', this.characterStartingCoords[1]);
+        this.character.setData('type', 'character');
+        this.setCellContent([this.character.getData('row'), this.character.getData('col')], this.character);
+
+        this.character.on('changedata', function (gameObject, value) {
+            this.checkCharacterDeath(this);
+            this.refreshInfoTexts();
+        }, this);
+        this.spells = [
+            this.createSpell (30, 550, 'red_orb', 'Bond astral', '', Phaser.Input.Keyboard.KeyCodes.ONE, -1, 1, 1, 1, true, false, false, true, true, 
+                function(context, destCellCoords){
+                    return context.teleport(context, destCellCoords);
+                }),
+            this.createSpell (280, 550, 'blue_orb', 'Immobilisme', '', Phaser.Input.Keyboard.KeyCodes.TWO, -1, 1, 2, 2, false, true, false, true, true, 
+                function(context, destCellCoords){
+                    var destCell = context.findCell(destCellCoords);
+                    if ( ! destCell) {
+                        return false;
+                    }
+
+                    // Lose 5 health
+                    context.character.data.values.health -= 5;
+
+                    // All grown flames get closer to targeted cell
+                    for (var flame of context.flames) {
+                        if (flame.getData('type') == 'flame') {
+                            var fromPos = [flame.getData('row'), flame.getData('col')];
+                            var nextCellPos = context.getCellToMoveToward(context, fromPos, destCellCoords);
+                            var nextCell = context.findCell(nextCellPos);
+							
+							// If destination cell is empty, move, otherwise, do nothing.
+                            if (nextCell && nextCell.getData('content') == null) {
+                                context.moveEntity(context, flame, nextCellPos);
+                            }
+                        }
+                    }
+
+                    return true;
+                }),
+            this.createSpell (530, 550, 'green_orb', 'Bond double', '', Phaser.Input.Keyboard.KeyCodes.THREE, 2, 2, 1, 2, true, false, false, true, true, 
+                function(context, destCellCoords){
+                    return context.teleport(context, destCellCoords);
+                })
+        ];
+
+        this.refreshInfoTexts();
+        this.moveEntity(this, this.character, [this.character.getData('row'), this.character.getData('col')])
+
+        this.input.keyboard.on('keydown', this.keydownEventHandler, this);
+
+        this.spawnFlames(this.spawnsPerTurn);
+    }
+	
+	createFlame (cell) {
+		var flamePos = this.coordinatesToLocation (cell[0], cell[1]);
+		var flame = this.add.image(flamePos[0], flamePos[1] + 4, 'blue_flame');
+		
+		flame.setDataEnabled();
+		flame.setDepth(this.processDepth(this, cell) + 1000);
+		flame.setData('row', cell[0]);
+		flame.setData('col', cell[1]);
+		flame.setData('type', 'flame');
+		
+		this.setCellContent(cell, flame);
+		this.flames.push(flame);
+	}
+	
+	processDepth (context, coords) {
+		return context.centerY + (coords[0] + coords[1]) * context.tileHeightHalf;
+	}
+
+    teleport (context, destCellCoords) {
+        var destCell = context.findCell(destCellCoords);
+        if ( ! destCell) {
+            return false;
+        }
+		var timeline = context.tweens.createTimeline();
+
+        // Lose 1 health
+        context.character.data.values.health -= 1;
+
+        var cellContent = destCell.getData('content');
+        if (cellContent && cellContent.getData('type') == 'flame') {
+
+            // Every flame directly or diagonnally adjacent is pushed away 1 cell
+
+            var adjacentFlames = context.filterAdjacent(context.flames, destCellCoords);
+            
+            for (var flame of adjacentFlames) {
+				var flameCoords = [flame.getData('row'), flame.getData('col')];
+                var awayCellPos = context.getCellToMoveAwayFrom(context, flameCoords, destCellCoords);
+                var awayCell = context.findCell(awayCellPos);
+				// Check if destination cell is free
+                if (awayCell && awayCell.getData('content') == null) {
+				
+					// Check if nothing is in the way when doing a diagonal move
+					if (context.checkCorners(context, flameCoords, awayCellPos)) {
+						context.moveEntity(context, flame, awayCellPos, timeline);
+					} else {
+						// Collision ==> Game over
+						console.log('Move away impossible');
+						if (timeline && timeline.totalData == 0) {
+							timeline.play();
+						}
+						context.gameOver(context);
+					}
+                } else {
+                    // Collision ==> Game over
+                    console.log('Move away impossible');
+					if (timeline && timeline.totalData == 0) {
+						timeline.play();
+					}
+					context.gameOver(context);
+                }
+            }
+
+            context.arrayRemove(context.flames, cellContent);
+            context.setCellContent(destCellCoords, null);
+            cellContent.destroy();
+
+            context.nbKills++;
+            context.character.data.values.health ++;
+			context.checkVictory(context);
+        }
+        context.moveEntity(context, context.character, destCellCoords);
+		
+		// If timeline is empty at this point, no need to use it.
+		if (timeline.totalData == 0) {
+			timeline = null;
+		}
+
+        // All enemies get closer
+        var sortedFlames = context.sortArrayByIncreasingDistanceToCell(context, context.flames, destCellCoords);
+        
+        for (var flame of sortedFlames) {
+            if (flame.getData('type') == 'flame') {
+                var fromPos = [flame.getData('row'), flame.getData('col')];
+                var targetPos = [context.character.getData('row'), context.character.getData('col')];
+                var nextCellPos = context.getCellToMoveToward(context, fromPos, targetPos);
+
+                var nextCell = context.findCell(nextCellPos);
+                if (nextCell && (nextCell.getData('content') == null || nextCell.getData('content').getData('type') == 'spawning_flame')) {
+                    context.moveEntity(context, flame, nextCellPos, timeline);
+                } else if (nextCell.getData('content').getData('type') == 'character'){
+                    // Collision ==> Game over
+                    console.log('Move toward impossible', );
+					if (timeline && timeline.totalData == 0) {
+						timeline.play();
+					}
+					context.gameOver(context);
+                    
+                }
+            }
+        }
+		if (timeline) {
+			timeline.play();
+		}
+        return true;
+    }
+	
+	/**
+	 * returns true when move can be done without any collision ocurring, false otherwise.
+	 */
+	checkCorners (context, fromCoords, toCoords) {
+		// If same cell, return true (no collision)
+		var moveX = toCoords[0] - fromCoords[0];
+		var moveY = toCoords[1] - fromCoords[1];
+		
+		// check for diagonal move
+		if (Math.abs(moveX) == Math.abs(moveY)) {
+			var directionX = Math.abs(moveX) / moveX;
+			var directionY = Math.abs(moveY) / moveY;
+			// Check for collision on the x axis
+			for (var checkX = fromCoords[0] + directionX, checkY = fromCoords[1] ; checkX != toCoords[0] + directionX; checkX += directionX, checkY += directionY) {
+				if (checkX == toCoords[0] + directionX) {
+					break;
+				}
+				var checkCell = context.findCell([checkX, checkY]);
+				// If it's out of the terrain or it is occupied, collision occurs
+				if (! checkCell || checkCell.getData('content') != null) {
+					return false;
+				} else {
+					this.findCell([checkX, checkY]).setTexture('cells', 'dark-cell-blue-border');
+				}
+			}
+			
+			// Check for collision on the y axis
+			for (var checkX = fromCoords[0], checkY = fromCoords[1] + directionY ; checkY != toCoords[1] + directionY; checkX += directionX, checkY += directionY) {
+				if (checkY == toCoords[1] + directionY) {
+					break;
+				}
+				var checkCell = context.findCell([checkX, checkY]);
+				// If it's out of the terrain or it is occupied, collision occurs
+				if (! checkCell || checkCell.getData('content') != null) {
+					console.log(fromCoords, toCoords, directionY);
+					console.log(checkX, checkY);
+					return false;
+				} else {
+					this.findCell([checkX, checkY]).setTexture('cells', 'dark-cell-blue-border');
+				}
+			}
+			return true;
+		} else {
+			return true;
+		}
+	}
+	
+    sortArrayByIncreasingDistanceToCell (context, array, cellCoords) {
+        array.sort(function(a, b){
+            var cellCoordsA = [a.getData('row'), a.getData('col')];
+            var cellCoordsB = [b.getData('row'), b.getData('col')];
+
+            return context.manhattanDistance(cellCoordsA, cellCoords) - context.manhattanDistance(cellCoordsB, cellCoords);
+        });
+        return array;
+    }
+
+
+    sleep (ms) {
+        var start = Date.now(),
+            now = start;
+        while (now - start < ms) {
+            now = Date.now();
+        }
+    }
+
+
+    filterAdjacent(array, cell) {
+        return array.filter(function (element) {
+            if (element.getData('type') != 'flame') {
+                return false;
+            }
+            var elementPos = [element.getData('row'), element.getData('col')];
+            var distanceX = Math.abs(cell[0] - elementPos[0]);
+            var distanceY = Math.abs(cell[1] - elementPos[1]);
+            if ((distanceX == 0 && distanceY == 0) || distanceX > 1 || distanceY > 1){
+                return false;
+            } else {
+                return true;
+            }
+        });
+    }
+
+    getCellToMoveToward (context, fromPos, targetPos) {
+        // Check for diagonnal placement
+        var distanceX = fromPos[0] - targetPos[0];
+        var distanceY = fromPos[1] - targetPos[1];
+        if (Math.abs(distanceX) == Math.abs(distanceY)) {
+            return [fromPos[0] - (distanceX / Math.abs(distanceX)), fromPos[1] - (distanceY / Math.abs(distanceY))];
+        } else {
+            if (Math.abs(distanceX) > Math.abs(distanceY)) {
+                return [fromPos[0] - (distanceX / Math.abs(distanceX)), fromPos[1]];
+            } else {
+                return [fromPos[0], fromPos[1] - (distanceY / Math.abs(distanceY))];
+            }
+        }
+    }
+
+    getCellToMoveAwayFrom (context, fromPos, targetPos) {
+        // Check for diagonnal placement
+        var distanceX = fromPos[0] - targetPos[0];
+        var distanceY = fromPos[1] - targetPos[1];
+        if (Math.abs(distanceX) == Math.abs(distanceY)) {
+            return [fromPos[0] + (distanceX / Math.abs(distanceX)), fromPos[1] + (distanceY / Math.abs(distanceY))];
+        } else {
+            if (Math.abs(distanceX) > Math.abs(distanceY)) {
+                return [fromPos[0] + (distanceX / Math.abs(distanceX)), fromPos[1]];
+            } else {
+                return [fromPos[0], fromPos[1] + (distanceY / Math.abs(distanceY))];
+            }
+        }
+    }
+
+    arrayRemove (arr, value) { 
+    
+        return arr.filter(function(ele){ 
+            return ele != value; 
+        });
+    }
+
+    endTurn () {
+        this.character.data.values.ap = this.character.data.values.baseAp;
+        this.turnNumber++;
+
+		// Reset spell 
+        for (var spell of this.spells) {
+            spell.setData('usesThisTurn', 0);
+        }
+
+        for (var flame of this.flames) {
+            var flameCoords = [flame.getData('row'), flame.getData('col')]
+            if (flame.getData('type') == 'spawning_flame') {
+                if (this.findCell(flameCoords).getData('content') == null) {
+                    flame.setData('type', 'flame');
+					flame.setTexture('blue_flame');
+                    this.setCellContent(flameCoords, flame);
+                } else {
+                    flame.destroy();
+                }
+                
+            }
+        }
+		if (this.turnNumber <= this.maxSpawnTurn) {
+			this.spawnFlames(this.spawnsPerTurn);
+		}
+    }
+
+    cellBaseColor (x, y) {
+        return ((x+y) % 2 === 1) ? 'dark-cell' : 'light-cell';
+    }
+
+    createSpell (posX, posY, imageName, spellname, description, hotkey, maxUsesPerTurn, apCost, minRange, maxRange, requiresInLine, forbiddenInLine, requiresLineOfSight, canCastOnEmptyCell, canCastOnOccupiedCell, applySpellEffects) {
+        const imageObject = this.add.image(posX, posY, imageName)
+
+        imageObject.setAlpha(0.5);
+
+        imageObject.setDataEnabled();
+		imageObject.setInteractive();
+
+        imageObject.data.set('spellname', spellname);
+        imageObject.data.set('description', description);
+        imageObject.data.set('maxUsesPerTurn', maxUsesPerTurn);
+        imageObject.data.set('usesThisTurn', 0);
+        imageObject.data.set('apCost', apCost);
+        imageObject.data.set('hotkey', hotkey);
+        imageObject.data.set('minRange', minRange);
+        imageObject.data.set('maxRange', maxRange);
+        imageObject.data.set('requiresInLine', requiresInLine);
+        imageObject.data.set('forbiddenInLine', forbiddenInLine);
+        imageObject.data.set('requiresInLine', requiresInLine);
+        imageObject.data.set('canCastOnEmptyCell', canCastOnEmptyCell);
+        imageObject.data.set('canCastOnOccupiedCell', canCastOnOccupiedCell);
+        imageObject.data.set('applySpellEffects', applySpellEffects);
+        imageObject.data.set('isSelected', false);
+		
+		var text = this.add.text(posX + 20, posY - 20, this.createSpellText(imageObject), { font: '16px Courier', fill: '#00ff00' });
+		text.setInteractive();
+		
+		text.on ('pointerup', function() {
+			var nbCells = this.highlightCastableCells(imageObject);
+			if (nbCells > 0) {
+				imageObject.data.set('isSelected', true);
+			} else {
+				imageObject.data.set('isSelected', false);
+			}
+		}, this);
+		
+        imageObject.data.set('text', text);
+
+
+        imageObject.on('changedata', function (gameObject, value) {
+            imageObject.getData('text').setText(this.createSpellText(imageObject));
+            imageObject.setAlpha((imageObject.getData('isSelected') ? 1 : 0.5));
+            
+        }, this);
+		
+        imageObject.on('pointerdown', function (gameObject, value) {
+			var nbCells = this.highlightCastableCells(imageObject);
+			if (nbCells > 0) {
+				imageObject.data.set('isSelected', true);
+			} else {
+				imageObject.data.set('isSelected', false);
+			}
+            
+        }, this);
+
+        return imageObject;
+    }
+
+    createSpellText (spellGameObject) {
+        const spellText = [
+            spellGameObject.getData('spellname'), 
+            'Cost : ' + spellGameObject.getData('apCost') + ' AP' + (spellGameObject.getData('apCost') > 1 ? 's' : ''),
+            'Uses : ' + spellGameObject.getData('usesThisTurn') + (spellGameObject.getData('maxUsesPerTurn') > 0 ? '/' + spellGameObject.getData('maxUsesPerTurn') : '')
+        ]
+        return spellText;1
+    }
+
+    keydownEventHandler (event) {
+        var selectedSpell = null;
+        // Spells handling
+        for ( const spell of this.spells ) {
+            if (event.keyCode === spell.getData('hotkey')) {
+                selectedSpell = ( ! spell.getData('isSelected') ? spell : null);
+                spell.data.set('isSelected', false);
+            } else {
+                spell.data.set('isSelected', false);
+            }
+        }
+
+        if (selectedSpell != null) {
+            var nbCells = this.highlightCastableCells(selectedSpell);
+            if (nbCells > 0) {
+                selectedSpell.data.set('isSelected', true);
+            } else {
+                selectedSpell.data.set('isSelected', false);
+            }
+        } else {
+            this.clearAllGridTints();
+        }
+
+        // End turn handling
+        if (event.keyCode === Phaser.Input.Keyboard.KeyCodes.F2) {
+            this.endTurn();
+        }
+
+    }
+
+    cellClickEventHandler (context) {
+        return function (event) {
+            for ( const spell of context.spells ) {
+                if (spell.getData('isSelected')) {
+                    spell.data.set('isSelected', false);
+                    const destCellX = this.getData('row');
+                    const destCellY = this.getData('col');
+                    if (context.canCastSpell(spell, destCellX, destCellY)) {
+                        if (spell.getData('applySpellEffects')(context, [destCellX, destCellY])) {
+                            context.character.data.set('ap', context.character.getData('ap') - spell.getData('apCost'));
+                            spell.data.set('usesThisTurn', spell.getData('usesThisTurn') + 1);
+                        }
+
+                        context.clearAllGridTints();
+                    }
+                }
+            }
+        };
+        
+    }
+
+    clearAllGridTints () {
+        for (const c of this.blocks) {
+            c.clearTint();
+        }
+    }
+
+    highlightCastableCells (spellGameObject) {
+        var nbCells = 0;
+        for (const c of this.blocks) {
+            const cellX = c.getData('row');
+            const cellY = c.getData('col');
+
+            if (this.canCastSpell(spellGameObject, cellX, cellY)) {
+                c.setTint(0xdd0000);
+                nbCells ++;
+            } else {
+                c.clearTint();
+            }
+        }
+
+        return nbCells;
+    }
+
+    canCastSpell (spellGameObject, x, y) {
+        // Check remaining AP
+        if (spellGameObject.getData('apCost') > this.character.getData('ap')) {
+            return false;
+        }
+
+        // Check uses per turn
+        const maxUsesPerTurn = spellGameObject.getData('maxUsesPerTurn');
+        const usesThisTurn = spellGameObject.getData('usesThisTurn');
+        if (maxUsesPerTurn > 0 && usesThisTurn >= maxUsesPerTurn) {
+            return false;
+        }
+
+        // Check destination cell occupation
+        const destCell = this.findCell([x, y]);
+        if (! destCell) {
+            return false;
+        }
+        
+        if (( ! spellGameObject.getData('canCastOnEmptyCell') && destCell.getData('content') == null) || ( ! spellGameObject.getData('canCastOnOccupiedCell') && destCell.getData('content') != null)) {
+            return false;
+        }
+
+        // Check specific spell conditions
+        const charPosX = this.character.getData('row');
+        const charPosY = this.character.getData('col');
+        const distance = this.manhattanDistance([charPosX, charPosY], [x, y]);
+        const sameLine = this.isOnSameLine(x, y, charPosX, charPosY);
+
+        // Inline
+        if (spellGameObject.getData('requiresInLine') && ! sameLine) {
+            return false;
+        }
+        if (spellGameObject.getData('forbiddenInLine') && sameLine) {
+            return false;
+        }
+
+        // Range
+        if (distance < spellGameObject.getData('minRange') || distance > spellGameObject.getData('maxRange')) {
+            return false;
+        }
+        
+        // Line of sight (simplified)
+        var coefX = -1 * (charPosX - x == 0 ? 1 : (charPosX - x) / Math.abs(charPosX - x));
+        var coefY = -1 * (charPosY - y == 0 ? 1 : (charPosY - y) / Math.abs(charPosY - y));
+        
+        for (var x1 = charPosX ; x1 != x ; x1 += coefX) {
+            if (x1 == x) break;
+            if (x1 == charPosX) continue;
+            if (Math.abs(x1) >= 100) break;
+            var found = this.findCell([x1, y]);
+            if (found && found.getData('content') != null) {
+                return false;
+            }
+        }
+        
+        for (var y1 = charPosY ; y1 != y ; y1 += coefY) {
+            if (y1 == y) break;
+            if (y1 == charPosY) continue;
+            if (Math.abs(y1) >= 100) break;
+            var found = this.findCell([x, y1]);
+            if (found && found.getData('content') != null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    randomCell () {
+        var x, y;
+        do {
+            x = Math.floor(Math.random() * this.mapWidth);
+            y = Math.floor(Math.random() * this.mapHeight);
+        } while ( ! this.cellExists(x, y));
+
+        return [x, y];
+    }
+
+    cellExists (x, y) {
+        return !((x < 1) ||
+                (y < 1) ||
+                (x + y < 13) ||
+                (x - y > 14) ||
+                (x + y > 52) ||
+                (y - x > 13));
+    }
+
+
+
+    isOnSameLine (x1, y1, x2, y2) {
+        return x1 == x2 || y1 == y2;
+    }
+
+    manhattanDistance (coordsA, coordsB) {
+        return Math.abs(coordsA[0] - coordsB[0]) + Math.abs(coordsA[1] - coordsB[1]);
+    }
+
+    allNeighbors (x1, y1) {
+        const neighbors = [];
+
+        for (var y = 0; y < this.mapHeight; y++) {
+            for (var x = 0; x < this.mapWidth; x++) {
+                if (this.isNeighbor(x1, y1, x, y)) {
+                    neighbors.push([x, y]);
+                }
+            }
+        }
+
+        return neighbors;
+    }
+
+    isNeighbor (x1, y1, x2, y2) {
+        return this.cellExists(x1, y1) && this.cellExists(x2, y2) && (Math.abs(x1 - x2) + Math.abs(y1 - y2) == 1);
+    }
+
+    findCell (coords) {
+        for (const cell of this.blocks) {
+            if (cell.getData('row') == coords[0] && cell.getData('col') == coords[1]) {
+                return cell;
+            }
+        }
+        return null;
+    }
+
+    coordinatesToLocation (row, col) {
+        return [
+            this.centerX + (row - col) * this.tileWidthHalf, 
+            this.centerY + (row + col - 0.5) * this.tileHeightHalf
+        ];
+    }
+
+    refreshInfoTexts () {
+        this.characterInfoText.setText([
+            'Health : ' + this.character.getData('health'),
+            'Action points : ' + this.character.getData('ap')
+        ]);
+        this.gameInfoText.setText([
+            'Turn : ' + this.turnNumber,
+            'Kills : ' + this.nbKills
+        ]);
+    }
+    spawnFlames (nbFlames) {
+        // Flames spawn on empty cells.
+        // They spawn on empty cells, 4 to 16 cells away from the character's starting position.
+		
+		var distanceToPlayerStartingPos = [4, 16];
+
+        var minDistanceToOtherFlame = 1;
+
+        for (var flameId = 0 ; flameId < nbFlames ; flameId ++) {
+            var cell;
+            var isValid;
+            do {
+                isValid = true
+                cell = this.randomCell();
+				var distance = this.manhattanDistance(this.characterStartingCoords, cell);
+                if (distance <=  distanceToPlayerStartingPos[0] || distance >=  distanceToPlayerStartingPos[1]) {
+                    isValid = false;
+                    continue;
+                }
+                for (var entity of this.flames) {
+                    if (this.manhattanDistance([entity.getData('row'), entity.getData('col')], cell) < minDistanceToOtherFlame) {
+                        isValid = false;
+                        break;
+                    }
+                }
+            } while (! isValid);
+            var flamePos = this.coordinatesToLocation (cell[0], cell[1]);
+            var flame = this.add.image(flamePos[0], flamePos[1] + 4, 'spark');
+            
+            flame.setDataEnabled();
+            flame.setDepth(this.processDepth(this, cell) + 1000);
+            flame.setData('row', cell[0]);
+            flame.setData('col', cell[1]);
+            flame.setData('type', 'spawning_flame');
+
+
+            this.flames.push(flame);
+        }
+    }
+
+    setCellContent (coords, content) {
+        var cell = this.findCell(coords);
+        if (cell) {
+            cell.setData('content', content);
+			 
+			// Add coloring depending on content type
+			var block = this.cellBaseColor(coords[0], coords[1]);
+			if (content) {
+				var contentType = content.getData('type');
+				if (contentType == 'character') {
+					cell.setTexture('cells', block + '-blue-border');
+				} else if (contentType == 'flame' || contentType == 'spawning_flame') {
+					cell.setTexture('cells', block + '-red-border');
+				} else {
+					cell.setTexture('cells', block + '-empty');
+				}
+			} else {
+				cell.setTexture('cells', block + '-empty');
+			}
+        }
+    }
+
+    moveEntity (context, entity, newCoords, timeline) {
+
+        // Clear previous cell content
+        context.setCellContent([entity.getData('row'), entity.getData('col')], null);
+        entity.setData('row', newCoords[0]);
+        entity.setData('col', newCoords[1]);
+		entity.setDepth(context.processDepth(context, newCoords) + 1000);
+
+        // Process new location
+        var location = context.coordinatesToLocation (newCoords[0], newCoords[1]);
+
+        context.setCellContent(newCoords, entity);
+		
+		var tween = {
+			targets: entity,
+			x: { value: location[0], duration: 500, ease: 'Power1' },
+			y: { value: location[1] + 10 - entity.height / 2, duration: 500, ease: 'Power1' }
+		};
+		
+		if (timeline) {
+			timeline.add(tween);
+		} else {
+			context.tweens.add(tween);
+		}
+    }
+    
+    checkCharacterDeath (context) {
+        if (this.character.getData('health') <= 0) {
+		console.log('dead')
+            context.gameOver(context);
+        }
+    }
+	
+	checkVictory (context) {
+		if (context.flames.length == 0) {
+			// Victory
+			context.gameStateText1.setText('Victory !');
+			context.gameStateText2.setText('Click here to restart !');
+			context.gameStateText1.setInteractive();
+			context.gameStateText2.setInteractive();
+		}
+	}
+	
+	gameOver (context) {
+		context.gameStateText1.setText('Game over !');
+		context.gameStateText2.setText('Click here to restart !');
+		context.gameStateText1.setInteractive();
+		context.gameStateText2.setInteractive();
+	}
+    
+}
+
+const config = {
+    type: Phaser.WEBGL,
+    parent: 'phaser-example',
+    width: 800,
+    height: 600,
+    scene: [ Bolgrot ]
+};
+
+const game = new Phaser.Game(config);
+
+
+</script>
+
+</body>
+</html>
