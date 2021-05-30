@@ -41,13 +41,13 @@ class Bolgrot extends Phaser.Scene {
 		
         this.gameInfoText = this.add.text(250, 10, '', { font: '16px Courier', fill: '#00ff00' });
         this.gameStateText1 = this.add.text(450, 10, 'Bolgrot', { font: '22px Courier', fill: '#ff0000' });
-        this.gameStateText2 = this.add.text(450, 40, 'Extinguish all the flames by standing on it', { font: '16px Courier', fill: '#00ff00' });
+        this.gameStateText2 = this.add.text(450, 40, 'Keys : 1, 2, 3 : spells ; F2 end turn', { font: '16px Courier', fill: '#00ff00' });
 		
 		this.gameStateText1.on('pointerup', function () {
 			this.gameStateText1.disableInteractive();
 			this.gameStateText2.disableInteractive();
 			this.gameStateText1.setText('Bolgrot');
-			this.gameStateText2.setText('Extinguish all the flames by standing on it');
+			this.gameStateText2.setText('Extinguish the flames');
 			this.scene.restart();
 		}, this);
 		
@@ -55,7 +55,7 @@ class Bolgrot extends Phaser.Scene {
 			this.gameStateText1.disableInteractive();
 			this.gameStateText2.disableInteractive();
 			this.gameStateText1.setText('Bolgrot');
-			this.gameStateText2.setText('Extinguish all the flames by standing on it');
+			this.gameStateText2.setText('Extinguish all the flames');
 			this.scene.restart();
 		}, this);
 
@@ -223,7 +223,6 @@ class Bolgrot extends Phaser.Scene {
 						context.moveEntity(context, flame, awayCellPos, timeline);
 					} else {
 						// Collision ==> Game over
-						console.log('Move away impossible');
 						if (timeline && timeline.totalData == 0) {
 							timeline.play();
 						}
@@ -231,7 +230,6 @@ class Bolgrot extends Phaser.Scene {
 					}
                 } else {
                     // Collision ==> Game over
-                    console.log('Move away impossible');
 					if (timeline && timeline.totalData == 0) {
 						timeline.play();
 					}
@@ -268,7 +266,6 @@ class Bolgrot extends Phaser.Scene {
                     context.moveEntity(context, flame, nextCellPos, timeline);
                 } else if (nextCell.getData('content').getData('type') == 'character'){
                     // Collision ==> Game over
-                    console.log('Move toward impossible', );
 					if (timeline && timeline.totalData == 0) {
 						timeline.play();
 					}
@@ -304,8 +301,6 @@ class Bolgrot extends Phaser.Scene {
 				// If it's out of the terrain or it is occupied, collision occurs
 				if (! checkCell || checkCell.getData('content') != null) {
 					return false;
-				} else {
-					this.findCell([checkX, checkY]).setTexture('cells', 'dark-cell-blue-border');
 				}
 			}
 			
@@ -317,11 +312,7 @@ class Bolgrot extends Phaser.Scene {
 				var checkCell = context.findCell([checkX, checkY]);
 				// If it's out of the terrain or it is occupied, collision occurs
 				if (! checkCell || checkCell.getData('content') != null) {
-					console.log(fromCoords, toCoords, directionY);
-					console.log(checkX, checkY);
 					return false;
-				} else {
-					this.findCell([checkX, checkY]).setTexture('cells', 'dark-cell-blue-border');
 				}
 			}
 			return true;
@@ -806,7 +797,6 @@ class Bolgrot extends Phaser.Scene {
     
     checkCharacterDeath (context) {
         if (this.character.getData('health') <= 0) {
-		console.log('dead')
             context.gameOver(context);
         }
     }
