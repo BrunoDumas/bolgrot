@@ -20,7 +20,7 @@ class Bolgrot extends Phaser.Scene {
     }
 
     preload () {
-        this.load.image('spark', 'assets/sprites/spark.png');
+        this.load.image('spark', 'assets/sprites/spark_2.png');
         this.load.image('blue_flame', 'assets/sprites/blue_flame.png');
         this.load.image('red_orb', 'assets/sprites/orb-red.png');
         this.load.image('green_orb', 'assets/sprites/orb-green.png');
@@ -31,12 +31,11 @@ class Bolgrot extends Phaser.Scene {
     }
 
     create () {
-        //this.input.topOnly = true;
-
         this.turnNumber = 1;
         this.maxSpawnTurn = 6;
         this.spawnsPerTurn = 6;
         this.nbKills = 0;
+		this.isGameOver = false;
         
         this.characterInfoText = this.add.text(10, 10, '', { font: '16px Courier', fill: '#00ff00' });
 		
@@ -86,25 +85,41 @@ class Bolgrot extends Phaser.Scene {
                 var tx = (x - y) * this.tileWidthHalf;
                 var ty = (x + y) * this.tileHeightHalf;
 
-                var block = this.cellBaseColor(x, y);
+                var baseColor = this.cellBaseColor(x, y);
 
-                var tile = this.add.image(this.centerX + tx, this.centerY + ty, 'cells', block + '-empty');
+                var tile = this.add.image(this.centerX + tx, this.centerY + ty, 'cells', baseColor + '-empty');
                 tile.setScale(this.imgScale);
                 tile.setDataEnabled();
 
                 tile.setData('row', x);
                 tile.setData('col', y);
                 tile.setData('content', null);
+				tile.setData('baseColor', baseColor);
 
                 tile.setDepth(this.centerY + ty);
-                tile.setInteractive();
+                tile.setInteractive(new Phaser.Geom.Polygon([ 19, 0, 20, 0, 39, 11, 39, 12, 20, 23, 19, 23, 0, 12, 0, 11 ]), Phaser.Geom.Polygon.Contains);
+				
                 tile.on('pointerout', function (pointer) {
-                    this.clearTint();
+					// Refresh cell coloring
+					var content = this.getData('content');
+					var baseColor = this.getData('baseColor');
+					if (content) {
+						var contentType = content.getData('type');
+						if (contentType == 'character') {
+							this.setTexture('cells', baseColor + '-blue-border');
+						} else if (contentType == 'flame' || contentType == 'spawning_flame') {
+							this.setTexture('cells', baseColor + '-red-border');
+						} else {
+							this.setTexture('cells', baseColor + '-empty');
+						}
+					} else {
+						this.setTexture('cells', baseColor + '-empty');
+					}
                 });
 
 
                 tile.on('pointerover', function (pointer) {
-                    this.setTint(0x00cccc);
+					this.setTexture('cells', this.getData('baseColor') + '-white-border');
                 });
 
                 tile.on('pointerup', this.cellClickEventHandler(this));
@@ -126,8 +141,12 @@ class Bolgrot extends Phaser.Scene {
         this.character.setData('row', this.characterStartingCoords[0]);
         this.character.setData('col', this.characterStartingCoords[1]);
         this.character.setData('type', 'character');
+		
         this.setCellContent([this.character.getData('row'), this.character.getData('col')], this.character);
-
+		
+		var characterLocation = this.coordinatesToLocation (this.characterStartingCoords[0], this.characterStartingCoords[1]);
+		this.character.x = characterLocation[0];
+		this.character.y = characterLocation[1] + 10 - this.character.height / 2;
         this.character.on('changedata', function (gameObject, value) {
             this.checkCharacterDeath(this);
             this.refreshInfoTexts();
@@ -136,8 +155,14 @@ class Bolgrot extends Phaser.Scene {
             this.createSpell (30, 550, 'red_orb', 'Bond astral', '', Phaser.Input.Keyboard.KeyCodes.ONE, -1, 1, 1, 1, true, false, false, true, true, 
                 function(context, destCellCoords){
                     return context.teleport(context, destCellCoords);
-                }),
-            this.createSpell (280, 550, 'blue_orb', 'Immobilisme', '', Phaser.Input.Keyboard.KeyCodes.TWO, -1, 1, 2, 2, false, true, false, true, true, 
+                }
+			),
+            this.createSpell (280, 550, 'green_orb', 'Bond double', '', Phaser.Input.Keyboard.KeyCodes.TWO, 2, 2, 1, 2, true, false, false, true, true, 
+                function(context, destCellCoords){
+                    return context.teleport(context, destCellCoords);
+                }
+			),
+            this.createSpell (530, 550, 'blue_orb', 'Immobilisme', '', Phaser.Input.Keyboard.KeyCodes.THREE, -1, 1, 2, 2, false, true, false, true, true, 
                 function(context, destCellCoords){
                     var destCell = context.findCell(destCellCoords);
                     if ( ! destCell) {
@@ -156,40 +181,22 @@ class Bolgrot extends Phaser.Scene {
 							
 							// If destination cell is empty, move, otherwise, do nothing.
                             if (nextCell && nextCell.getData('content') == null) {
-                                context.moveEntity(context, flame, nextCellPos);
+                                context.moveEntity(context, flame, nextCellPos, true);
                             }
                         }
                     }
 
                     return true;
-                }),
-            this.createSpell (530, 550, 'green_orb', 'Bond double', '', Phaser.Input.Keyboard.KeyCodes.THREE, 2, 2, 1, 2, true, false, false, true, true, 
-                function(context, destCellCoords){
-                    return context.teleport(context, destCellCoords);
-                })
+                }
+			)
         ];
 
         this.refreshInfoTexts();
-        this.moveEntity(this, this.character, [this.character.getData('row'), this.character.getData('col')])
 
         this.input.keyboard.on('keydown', this.keydownEventHandler, this);
 
         this.spawnFlames(this.spawnsPerTurn);
     }
-	
-	createFlame (cell) {
-		var flamePos = this.coordinatesToLocation (cell[0], cell[1]);
-		var flame = this.add.image(flamePos[0], flamePos[1] + 4, 'blue_flame');
-		
-		flame.setDataEnabled();
-		flame.setDepth(this.processDepth(this, cell) + 1000);
-		flame.setData('row', cell[0]);
-		flame.setData('col', cell[1]);
-		flame.setData('type', 'flame');
-		
-		this.setCellContent(cell, flame);
-		this.flames.push(flame);
-	}
 	
 	processDepth (context, coords) {
 		return context.centerY + (coords[0] + coords[1]) * context.tileHeightHalf;
@@ -200,7 +207,7 @@ class Bolgrot extends Phaser.Scene {
         if ( ! destCell) {
             return false;
         }
-		var timeline = context.tweens.createTimeline();
+		//var timeline = context.tweens.createTimeline();
 
         // Lose 1 health
         context.character.data.values.health -= 1;
@@ -221,24 +228,18 @@ class Bolgrot extends Phaser.Scene {
 				
 					// Check if nothing is in the way when doing a diagonal move
 					if (context.checkCorners(context, flameCoords, awayCellPos)) {
-						context.moveEntity(context, flame, awayCellPos, timeline);
+						context.moveEntity(context, flame, awayCellPos);
 					} else {
 						// Collision ==> Game over
-						if (timeline && timeline.totalData == 0) {
-							timeline.play();
-						}
 						context.gameOver(context);
 					}
                 } else {
-                    // Collision ==> Game over
-					if (timeline && timeline.totalData == 0) {
-						timeline.play();
-					}
+					// Collision ==> Game over
 					context.gameOver(context);
                 }
             }
 
-            context.arrayRemove(context.flames, cellContent);
+            context.flames = context.arrayRemove(context.flames, cellContent);
             context.setCellContent(destCellCoords, null);
             cellContent.destroy();
 
@@ -247,11 +248,6 @@ class Bolgrot extends Phaser.Scene {
 			context.checkVictory(context);
         }
         context.moveEntity(context, context.character, destCellCoords);
-		
-		// If timeline is empty at this point, no need to use it.
-		if (timeline.totalData == 0) {
-			timeline = null;
-		}
 
         // All enemies get closer
         var sortedFlames = context.sortArrayByIncreasingDistanceToCell(context, context.flames, destCellCoords);
@@ -264,19 +260,21 @@ class Bolgrot extends Phaser.Scene {
 
                 var nextCell = context.findCell(nextCellPos);
                 if (nextCell && (nextCell.getData('content') == null || nextCell.getData('content').getData('type') == 'spawning_flame')) {
-                    context.moveEntity(context, flame, nextCellPos, timeline);
+                    context.moveEntity(context, flame, nextCellPos);
                 } else if (nextCell.getData('content').getData('type') == 'character'){
                     // Collision ==> Game over
-					if (timeline && timeline.totalData == 0) {
-						timeline.play();
-					}
 					context.gameOver(context);
                     
                 }
             }
         }
-		if (timeline) {
-			timeline.play();
+		
+		for (var flame of sortedFlames) {
+			var timeline = flame.getData('timeline');
+			if (timeline) {
+				timeline.play();
+				flame.setData('timeline', this.tweens.createTimeline());
+			}
 		}
         return true;
     }
@@ -322,12 +320,71 @@ class Bolgrot extends Phaser.Scene {
 		}
 	}
 	
+	sortArrayByIncreasingDistanceToCellOld (context, array, cellCoords) {
+		function getCellFromCoords(ar, co) {
+			for (var a of ar) {
+				if (a.getData('row') == co[0] && a.getData('col') == co[1]) {
+					return a;
+				}
+			}
+			return null;
+		}
+		function containsCell(ar, ce) {
+			for (var a of ar) {
+				if (a.getData('row') == ce.getData('row') && a.getData('col') == ce.getData('col')) {
+					return true;
+				}
+			}
+			return false;
+		}
+		var initialCell = getCellFromCoords(array, cellCoords);
+		var sortedCells = [];
+		var queue = [initialCell];
+		
+		while (! queue.length == 0) {
+			var cell = queue.shift();
+			sortedCells.push(cell);
+			var cellPos = [cell.getData('row'), cell.getData('col')];
+			
+			var northEast = getCellFromCoords(array, [cellPos[0], cellPos[1] - 1]);
+			if ( northEast && ! containsCell(sortedCells, northEast)) {
+				queue.push(northEast);
+			}
+			
+			var southEast = getCellFromCoords(array, [cellPos[0] + 1, cellPos[1]]);
+			if ( southEast && ! containsCell(sortedCells, southEast)) {
+				queue.push(southEast);
+			}
+			
+			var southWest = getCellFromCoords(array, [cellPos[0], cellPos[1] + 1]);
+			if ( southWest && ! containsCell(sortedCells, southWest)) {
+				queue.push(southWest);
+			}
+			
+			var northWest = getCellFromCoords(array, [cellPos[0] - 1, cellPos[1]]);
+			if ( northWest && ! containsCell(sortedCells, northWest)) {
+				queue.push(northWest);
+			}
+		}
+		return sortedCells;
+	}
+	
     sortArrayByIncreasingDistanceToCell (context, array, cellCoords) {
         array.sort(function(a, b){
             var cellCoordsA = [a.getData('row'), a.getData('col')];
             var cellCoordsB = [b.getData('row'), b.getData('col')];
-
-            return context.manhattanDistance(cellCoordsA, cellCoords) - context.manhattanDistance(cellCoordsB, cellCoords);
+			
+			var inGameCellPriorityModifier = 0.0;
+			
+			var deltaXA = cellCoords[0] - cellCoordsA[0];
+			var deltaYA = cellCoords[1] - cellCoordsA[1];
+			var angleA = (Math.atan2(deltaYA, deltaXA) * (180 / Math.PI) + 270) % 360 / 361;
+			
+			var deltaXB = cellCoords[0] - cellCoordsB[0];
+			var deltaYB = cellCoords[1] - cellCoordsB[1];
+			var angleB = (Math.atan2(deltaYB, deltaXB) * (180 / Math.PI) + 270) % 360 / 361;
+			
+            return context.manhattanDistance(cellCoordsA, cellCoords) - context.manhattanDistance(cellCoordsB, cellCoords) + angleA - angleB;
         });
         return array;
     }
@@ -404,6 +461,7 @@ class Bolgrot extends Phaser.Scene {
             spell.setData('usesThisTurn', 0);
         }
 
+		// Upgrade spawning_flames from the previous turn to real flames
         for (var flame of this.flames) {
             var flameCoords = [flame.getData('row'), flame.getData('col')]
             if (flame.getData('type') == 'spawning_flame') {
@@ -413,6 +471,7 @@ class Bolgrot extends Phaser.Scene {
                     this.setCellContent(flameCoords, flame);
                 } else {
                     flame.destroy();
+					this.flames = this.arrayRemove(this.flames, flame);
                 }
                 
             }
@@ -454,6 +513,9 @@ class Bolgrot extends Phaser.Scene {
 		text.setInteractive();
 		
 		text.on ('pointerup', function() {
+			if (this.isGameOver) {
+				return;
+			}
 			var nbCells = this.highlightCastableCells(imageObject);
 			if (nbCells > 0) {
 				imageObject.data.set('isSelected', true);
@@ -472,6 +534,9 @@ class Bolgrot extends Phaser.Scene {
         }, this);
 		
         imageObject.on('pointerdown', function (gameObject, value) {
+			if (this.isGameOver) {
+				return;
+			}
 			var nbCells = this.highlightCastableCells(imageObject);
 			if (nbCells > 0) {
 				imageObject.data.set('isSelected', true);
@@ -490,10 +555,13 @@ class Bolgrot extends Phaser.Scene {
             'Cost : ' + spellGameObject.getData('apCost') + ' AP' + (spellGameObject.getData('apCost') > 1 ? 's' : ''),
             'Uses : ' + spellGameObject.getData('usesThisTurn') + (spellGameObject.getData('maxUsesPerTurn') > 0 ? '/' + spellGameObject.getData('maxUsesPerTurn') : '')
         ]
-        return spellText;1
+        return spellText;
     }
 
     keydownEventHandler (event) {
+		if (this.isGameOver) {
+			return;
+		}
         var selectedSpell = null;
         // Spells handling
         for ( const spell of this.spells ) {
@@ -557,7 +625,7 @@ class Bolgrot extends Phaser.Scene {
             const cellY = c.getData('col');
 
             if (this.canCastSpell(spellGameObject, cellX, cellY)) {
-                c.setTint(0xdd0000);
+                c.setTint(0xFF5555);
                 nbCells ++;
             } else {
                 c.clearTint();
@@ -742,6 +810,7 @@ class Bolgrot extends Phaser.Scene {
             flame.setData('row', cell[0]);
             flame.setData('col', cell[1]);
             flame.setData('type', 'spawning_flame');
+            flame.setData('timeline', this.tweens.createTimeline());
 
 
             this.flames.push(flame);
@@ -754,23 +823,23 @@ class Bolgrot extends Phaser.Scene {
             cell.setData('content', content);
 			 
 			// Add coloring depending on content type
-			var block = this.cellBaseColor(coords[0], coords[1]);
+			var baseColor = cell.getData('baseColor')
 			if (content) {
 				var contentType = content.getData('type');
 				if (contentType == 'character') {
-					cell.setTexture('cells', block + '-blue-border');
+					cell.setTexture('cells', baseColor + '-blue-border');
 				} else if (contentType == 'flame' || contentType == 'spawning_flame') {
-					cell.setTexture('cells', block + '-red-border');
+					cell.setTexture('cells', baseColor + '-red-border');
 				} else {
-					cell.setTexture('cells', block + '-empty');
+					cell.setTexture('cells', baseColor + '-empty');
 				}
 			} else {
-				cell.setTexture('cells', block + '-empty');
+				cell.setTexture('cells', baseColor + '-empty');
 			}
         }
     }
 
-    moveEntity (context, entity, newCoords, timeline) {
+    moveEntity (context, entity, newCoords, dontUseTimeline) {
 
         // Clear previous cell content
         context.setCellContent([entity.getData('row'), entity.getData('col')], null);
@@ -789,8 +858,8 @@ class Bolgrot extends Phaser.Scene {
 			y: { value: location[1] + 10 - entity.height / 2, duration: 500, ease: 'Power1' }
 		};
 		
-		if (timeline) {
-			timeline.add(tween);
+		if (! dontUseTimeline && entity.data.values.timeline) {
+			entity.data.values.timeline.add(tween);
 		} else {
 			context.tweens.add(tween);
 		}
@@ -805,6 +874,7 @@ class Bolgrot extends Phaser.Scene {
 	checkVictory (context) {
 		if (context.flames.length == 0) {
 			// Victory
+			context.isGameOver = true;
 			context.gameStateText1.setText('Victory !');
 			context.gameStateText2.setText('Click here to restart !');
 			context.gameStateText1.setInteractive();
@@ -813,6 +883,7 @@ class Bolgrot extends Phaser.Scene {
 	}
 	
 	gameOver (context) {
+		context.isGameOver = true;
 		context.gameStateText1.setText('Game over !');
 		context.gameStateText2.setText('Click here to restart !');
 		context.gameStateText1.setInteractive();
