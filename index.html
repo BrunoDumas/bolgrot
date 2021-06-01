@@ -5,6 +5,7 @@
     <title>Bolgrot</title>
 	<link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
     <script src="//cdn.jsdelivr.net/npm/phaser@3.11.0/dist/phaser.js"></script>
+	
     <style type="text/css">
         body {
             margin: 0;
@@ -12,9 +13,8 @@
     </style>
 </head>
 <body>
-
 <script type="text/javascript">
-class Bolgrot extends Phaser.Scene {
+class BolgrotScene extends Phaser.Scene {
     constructor () {
         super();
     }
@@ -41,21 +41,13 @@ class Bolgrot extends Phaser.Scene {
 		
         this.gameInfoText = this.add.text(250, 10, '', { font: '16px Courier', fill: '#00ff00' });
         this.gameStateText1 = this.add.text(450, 10, 'Bolgrot', { font: '22px Courier', fill: '#ff0000' });
-        this.gameStateText2 = this.add.text(450, 40, 'Keys : 1, 2, 3 : spells ; F2 end turn', { font: '16px Courier', fill: '#00ff00' });
+        this.gameStateText2 = this.add.text(450, 40, 'Touches : 1/&, 2/é, 3/" : sorts ; F2 fin de tour', { font: '16px Courier', fill: '#00ff00' });
 		
 		this.gameStateText1.on('pointerup', function () {
-			this.gameStateText1.disableInteractive();
-			this.gameStateText2.disableInteractive();
-			this.gameStateText1.setText('Bolgrot');
-			this.gameStateText2.setText('Extinguish the flames');
 			this.scene.restart();
 		}, this);
 		
 		this.gameStateText2.on('pointerup', function () {
-			this.gameStateText1.disableInteractive();
-			this.gameStateText2.disableInteractive();
-			this.gameStateText1.setText('Bolgrot');
-			this.gameStateText2.setText('Extinguish all the flames');
 			this.scene.restart();
 		}, this);
 
@@ -148,7 +140,6 @@ class Bolgrot extends Phaser.Scene {
 		this.character.x = characterLocation[0];
 		this.character.y = characterLocation[1] + 10 - this.character.height / 2;
         this.character.on('changedata', function (gameObject, value) {
-            this.checkCharacterDeath(this);
             this.refreshInfoTexts();
         }, this);
         this.spells = [
@@ -238,6 +229,14 @@ class Bolgrot extends Phaser.Scene {
 					context.gameOver(context);
                 }
             }
+			if (adjacentFlames.length > 0) {
+				for (var flame of context.flames) {
+					var flameTimeline = flame.getData('timeline');
+					if (flameTimeline && flameTimeline.totalData == 0) {
+						flameTimeline.add({targets: flame, x: flame.x, duration: 500});
+					}
+				}
+			}
 
             context.flames = context.arrayRemove(context.flames, cellContent);
             context.setCellContent(destCellCoords, null);
@@ -320,61 +319,10 @@ class Bolgrot extends Phaser.Scene {
 		}
 	}
 	
-	sortArrayByIncreasingDistanceToCellOld (context, array, cellCoords) {
-		function getCellFromCoords(ar, co) {
-			for (var a of ar) {
-				if (a.getData('row') == co[0] && a.getData('col') == co[1]) {
-					return a;
-				}
-			}
-			return null;
-		}
-		function containsCell(ar, ce) {
-			for (var a of ar) {
-				if (a.getData('row') == ce.getData('row') && a.getData('col') == ce.getData('col')) {
-					return true;
-				}
-			}
-			return false;
-		}
-		var initialCell = getCellFromCoords(array, cellCoords);
-		var sortedCells = [];
-		var queue = [initialCell];
-		
-		while (! queue.length == 0) {
-			var cell = queue.shift();
-			sortedCells.push(cell);
-			var cellPos = [cell.getData('row'), cell.getData('col')];
-			
-			var northEast = getCellFromCoords(array, [cellPos[0], cellPos[1] - 1]);
-			if ( northEast && ! containsCell(sortedCells, northEast)) {
-				queue.push(northEast);
-			}
-			
-			var southEast = getCellFromCoords(array, [cellPos[0] + 1, cellPos[1]]);
-			if ( southEast && ! containsCell(sortedCells, southEast)) {
-				queue.push(southEast);
-			}
-			
-			var southWest = getCellFromCoords(array, [cellPos[0], cellPos[1] + 1]);
-			if ( southWest && ! containsCell(sortedCells, southWest)) {
-				queue.push(southWest);
-			}
-			
-			var northWest = getCellFromCoords(array, [cellPos[0] - 1, cellPos[1]]);
-			if ( northWest && ! containsCell(sortedCells, northWest)) {
-				queue.push(northWest);
-			}
-		}
-		return sortedCells;
-	}
-	
     sortArrayByIncreasingDistanceToCell (context, array, cellCoords) {
         array.sort(function(a, b){
             var cellCoordsA = [a.getData('row'), a.getData('col')];
             var cellCoordsB = [b.getData('row'), b.getData('col')];
-			
-			var inGameCellPriorityModifier = 0.0;
 			
 			var deltaXA = cellCoords[0] - cellCoordsA[0];
 			var deltaYA = cellCoords[1] - cellCoordsA[1];
@@ -559,6 +507,9 @@ class Bolgrot extends Phaser.Scene {
     }
 
     keydownEventHandler (event) {
+		if (event.keyCode === Phaser.Input.Keyboard.KeyCodes.R) {
+            this.scene.restart();
+        }
 		if (this.isGameOver) {
 			return;
 		}
@@ -602,6 +553,7 @@ class Bolgrot extends Phaser.Scene {
                         if (spell.getData('applySpellEffects')(context, [destCellX, destCellY])) {
                             context.character.data.set('ap', context.character.getData('ap') - spell.getData('apCost'));
                             spell.data.set('usesThisTurn', spell.getData('usesThisTurn') + 1);
+							context.checkCharacterDeath(context);
                         }
 
                         context.clearAllGridTints();
@@ -854,8 +806,8 @@ class Bolgrot extends Phaser.Scene {
 		
 		var tween = {
 			targets: entity,
-			x: { value: location[0], duration: 500, ease: 'Power1' },
-			y: { value: location[1] + 10 - entity.height / 2, duration: 500, ease: 'Power1' }
+			x: { value: location[0], duration: 250, ease: 'Power1' },
+			y: { value: location[1] + 10 - entity.height / 2, duration: 250, ease: 'Power1' }
 		};
 		
 		if (! dontUseTimeline && entity.data.values.timeline) {
@@ -897,7 +849,7 @@ const config = {
     parent: 'phaser-example',
     width: 800,
     height: 600,
-    scene: [ Bolgrot ]
+    scene: [ BolgrotScene, TutoScene1 ]
 };
 
 const game = new Phaser.Game(config);
