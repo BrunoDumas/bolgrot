@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <title>Bolgrot</title>
 	<link rel="shortcut icon" type="image/x-icon" href="favicon.ico">
-    <script src="//cdn.jsdelivr.net/npm/phaser@3.11.0/dist/phaser.js"></script>
+	<script src="//cdn.jsdelivr.net/npm/phaser@3.11.0/dist/phaser.js"></script>
 	
     <style type="text/css">
         html, body {
@@ -31,17 +31,13 @@
     </style>
 </head>
 <body>
+
+<!--<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest">-->
 <script type="text/javascript">
 
 class Spell {
 	constructor (game, location, imageName, spellname, description, hotkey, maxUsesPerTurn, apCost, minRange, maxRange, requiresInLine, forbiddenInLine, requiresLineOfSight, canCastOnEmptyCell, canCastOnOccupiedCell, applySpellEffects) {
-        this.image = game.scene.add.image(location[0], location[1], imageName)
-
-        this.image.setAlpha(0.5);
-
-        this.image.setDataEnabled();
-		this.image.setInteractive();
-
+        this.game = game;
         this.spellname = spellname;
         this.description = description;
         this.maxUsesPerTurn = maxUsesPerTurn;
@@ -57,13 +53,17 @@ class Spell {
         this.canCastOnOccupiedCell = canCastOnOccupiedCell;
         this.applySpellEffects = applySpellEffects;
 		
-		this.game = game;
-		
-		this.text = game.scene.add.text(location[0] + 25, location[1] - 20, this.createSpellText(this), { font: '16px Courier', fill: '#00ff00' });
-		this.text.setInteractive();
-		
-		this.text.on ('pointerup', this.handleSpellClick, this);
-        this.image.on('pointerup', this.handleSpellClick, this);
+		if (! game.gameSettings.isHeadless) {
+			this.image = game.scene.add.image(location[0], location[1], imageName);
+			this.image.setAlpha(0.5);
+			this.image.setDataEnabled();
+			this.image.setInteractive();
+			this.image.on('pointerup', this.handleSpellClick, this);
+			
+			this.text = game.scene.add.text(location[0] + 25, location[1] - 20, this.createSpellText(this), { font: '16px Courier', fill: '#00ff00' });
+			this.text.setInteractive();
+			this.text.on ('pointerup', this.handleSpellClick, this);
+		}
     }
 	
 	static selectedSpell = null;
@@ -86,8 +86,10 @@ class Spell {
 	}
 	
 	refreshText () {
-		this.text.setText(this.createSpellText());
-		this.image.setAlpha((Spell.selectedSpell == this ? 1 : 0.5));
+		if (! this.game.gameSettings.isHeadless) {
+			this.text.setText(this.createSpellText());
+			this.image.setAlpha((Spell.selectedSpell == this ? 1 : 0.5));
+		}
 	}
 	
 	createSpellText () {
@@ -105,31 +107,21 @@ class Flame {
 	constructor(game, coords, type) {
 		this.coords = coords;
 		this.type = type;
-		this.timeline = game.scene.tweens.createTimeline();
 		
-		var flamePos = game.grid.coordinatesToLocation (coords);
-		this.image = game.scene.add.image(flamePos[0], flamePos[1] + 4, 'spark');
-		this.image.setDataEnabled();
-		this.image.setDepth(game.grid.processDepth(coords) + 1000);
+		if (! game.gameSettings.isHeadless) {
+			this.timeline = game.scene.tweens.createTimeline();
+		
+			var flamePos = game.grid.coordinatesToLocation (coords);
+			this.image = game.scene.add.image(flamePos[0], flamePos[1] + 4, 'spark');
+			this.image.setDataEnabled();
+			this.image.setDepth(game.grid.processDepth(coords) + 1000);
+		}
 	}
 }
 
 class Character {
 	constructor (scene, game, characterStartingData) {
 		this.game = game;
-		
-		// Image
-		this.image = scene.add.image(0, 0, 'character');
-		this.image.setDataEnabled();
-		this.image.setDepth(game.grid.processDepth(characterStartingData.startingCoords) + 1000);
-		
-		var characterLocation = game.grid.coordinatesToLocation (characterStartingData.startingCoords);
-		this.image.x = characterLocation[0];
-		this.image.y = characterLocation[1] + 10 - this.image.height / 2;
-        this.image.on('changedata', function (gameObject, value) {
-            this.refreshInfoTexts();
-        }, scene);
-        
 		// Character data
 		this.characterStartingData = characterStartingData;
         this.health = characterStartingData.health;
@@ -138,16 +130,36 @@ class Character {
 		this.coords = characterStartingData.startingCoords;
 		this.type = 'character';
 		
+		if (! game.gameSettings.isHeadless) {
+			// Image
+			this.image = scene.add.image(0, 0, 'character');
+			this.image.setDataEnabled();
+			this.image.setDepth(game.grid.processDepth(characterStartingData.startingCoords) + 1000);
+			
+			var characterLocation = game.grid.coordinatesToLocation (characterStartingData.startingCoords);
+			this.image.x = characterLocation[0];
+			this.image.y = characterLocation[1] + 10 - this.image.height / 2;
+			this.image.on('changedata', function (gameObject, value) {
+				this.refreshInfoTexts();
+			}, scene);
+			
+			// Text
+			this.text = scene.add.text(20, 500, "");
+			this.refreshText();
+		}
+        
 		
-		// Text
-		this.text = scene.add.text(20, 500, "");
-		this.refreshText();
+		
+		
+		
 		
         game.grid.setCellContent(characterStartingData.startingCoords, this);
 	}
 	
 	refreshText() {
-		this.text.setText(['Vie : ' + this.health, 'PA : ' + this.ap + '/' + this.baseAp, 'Tour : ' + this.game.turnNumber, 'Flammes tuées : ' + this.game.nbKills]);
+		if (! this.game.gameSettings.isHeadless) {
+			this.text.setText(['Vie : ' + this.health, 'PA : ' + this.ap + '/' + this.baseAp, 'Tour : ' + this.game.turnNumber, 'Flammes tuées : ' + this.game.nbKills]);
+		}
 	}
 	
 	endOfTurnReset () {
@@ -161,33 +173,36 @@ class Cell {
 		this.content = content;
 		this.baseColor = baseColor;
 		
-		this.image = scene.add.image(onScreenLocation[0], onScreenLocation[1], 'cells', baseColor + '-empty');
-		this.image.setDataEnabled();
-		this.image.setDepth(depth);
-		this.image.setInteractive(new Phaser.Geom.Polygon([ 19, 0, 20, 0, 39, 11, 39, 12, 20, 23, 19, 23, 0, 12, 0, 11 ]), Phaser.Geom.Polygon.Contains);
-		this.image.setData('cell', this);
+		if (! game.gameSettings.isHeadless) {
 		
-		this.image.on('pointerout', function (pointer) {
-			// Refresh cell coloring
-			if (this.content != null) {
-				if (this.content.type == 'character') {
-					this.image.setTexture('cells', baseColor + '-blue-border');
-				} else if (this.content.type == 'flame' || this.content.type == 'spawning_flame') {
-					this.image.setTexture('cells', baseColor + '-red-border');
+			this.image = scene.add.image(onScreenLocation[0], onScreenLocation[1], 'cells', baseColor + '-empty');
+			this.image.setDataEnabled();
+			this.image.setDepth(depth);
+			this.image.setInteractive(new Phaser.Geom.Polygon([ 19, 0, 20, 0, 39, 11, 39, 12, 20, 23, 19, 23, 0, 12, 0, 11 ]), Phaser.Geom.Polygon.Contains);
+			this.image.setData('cell', this);
+			
+			this.image.on('pointerout', function (pointer) {
+				// Refresh cell coloring
+				if (this.content != null) {
+					if (this.content.type == 'character') {
+						this.image.setTexture('cells', baseColor + '-blue-border');
+					} else if (this.content.type == 'flame' || this.content.type == 'spawning_flame') {
+						this.image.setTexture('cells', baseColor + '-red-border');
+					} else {
+						this.image.setTexture('cells', baseColor + '-empty');
+					}
 				} else {
 					this.image.setTexture('cells', baseColor + '-empty');
 				}
-			} else {
-				this.image.setTexture('cells', baseColor + '-empty');
-			}
-		}, this);
+			}, this);
 
 
-		this.image.on('pointerover', function (pointer) {
-			this.image.setTexture('cells', this.baseColor + '-white-border');
-		}, this);
+			this.image.on('pointerover', function (pointer) {
+				this.image.setTexture('cells', this.baseColor + '-white-border');
+			}, this);
 
-		this.image.on('pointerup', game.cellClickEventHandler(game));
+			this.image.on('pointerup', game.cellClickEventHandler(game));
+		}
 	}
 }
 
@@ -236,9 +251,8 @@ class GUIHolder {
 
 class Grid {
 	constructor (scene, game, gridSettings) {
+		this.game = game;
 		this.gridSettings = gridSettings;
-        //this.gridSettings.centerX = (this.gridSettings.mapWidth / 2) * this.gridSettings.tileWidthHalf + 80;
-        //this.centerY = -60;
 
         this.cells = [];
 		this.flatCells = [];
@@ -432,16 +446,18 @@ class Grid {
             cell.content = content;
 			 
 			// Add coloring depending on content type
-			if (content) {
-				if (content.type == 'character') {
-					cell.image.setTexture('cells', cell.baseColor + '-blue-border');
-				} else if (content.type == 'flame' || content.type == 'spawning_flame') {
-					cell.image.setTexture('cells', cell.baseColor + '-red-border');
+			if (! this.game.gameSettings.isHeadless){
+				if (content) {
+					if (content.type == 'character') {
+						cell.image.setTexture('cells', cell.baseColor + '-blue-border');
+					} else if (content.type == 'flame' || content.type == 'spawning_flame') {
+						cell.image.setTexture('cells', cell.baseColor + '-red-border');
+					} else {
+						cell.image.setTexture('cells', cell.baseColor + '-empty');
+					}
 				} else {
 					cell.image.setTexture('cells', cell.baseColor + '-empty');
 				}
-			} else {
-				cell.image.setTexture('cells', cell.baseColor + '-empty');
 			}
         } else {
 			console.log('setCellContent: cell is null');
@@ -516,7 +532,7 @@ class Game {
 		
 		this.grid = new Grid(scene, this, gridSettings);
 		this.character = new Character(scene, this, characterStartingData);
-		this.gui = new GUIHolder();
+		//this.gui = new GUIHolder();
 		
 		this.flames = [];
 		
@@ -557,8 +573,9 @@ class Game {
                 }
 			)
         ];
-		
-		scene.input.keyboard.on('keydown', this.keydownEventHandler, this);
+		if (! gameSettings.isHeadless) {
+			scene.input.keyboard.on('keydown', this.keydownEventHandler, this);
+		}
 	}
 	
 	spawnFlames (nbFlames) {
@@ -593,14 +610,16 @@ class Game {
     }
 	
 	refreshInfoTexts () {
-        this.scene.characterInfoText.setText([
-            'Health : ' + this.game.character.health,
-            'Action points : ' + this.character.ap
-        ]);
-        this.scene.gameInfoText.setText([
-            'Turn : ' + this.turnNumber,
-            'Kills : ' + this.nbKills
-        ]);
+		if (! this.gameSettings.isHeadless) {
+			this.scene.characterInfoText.setText([
+				'Health : ' + this.game.character.health,
+				'Action points : ' + this.character.ap
+			]);
+			this.scene.gameInfoText.setText([
+				'Turn : ' + this.turnNumber,
+				'Kills : ' + this.nbKills
+			]);
+		}
     }
 	
 	endTurn () {
@@ -619,11 +638,19 @@ class Game {
             if (flame.type == 'spawning_flame') {
                 if (this.grid.getCell(flame.coords).content == null) {
                     flame.type = 'flame';
-					flame.image.setTexture('blue_flame');
-                    this.grid.setCellContent(flame.coords, flame);
+					this.grid.setCellContent(flame.coords, flame);
+					
+					if (! this.gameSettings.isHeadless) {
+						flame.image.setTexture('blue_flame');
+					}
+					
                 } else {
-                    flame.image.destroy();
 					this.removeFlame(flame);
+					
+                    if (! this.gameSettings.isHeadless) {
+						flame.image.destroy();
+					}
+					
                 }
                 
             }
@@ -692,23 +719,26 @@ class Game {
         // Clear previous cell content
         game.grid.setCellContent(entity.coords, null);
         entity.coords = newCoords;
-		entity.image.setDepth(game.grid.processDepth(newCoords) + 1000);
-
-        // Process new location
-        var location = game.grid.coordinatesToLocation (newCoords);
-
-        game.grid.setCellContent(newCoords, entity);
 		
-		var tween = {
-			targets: entity.image,
-			x: { value: location[0], duration: 250, ease: 'Power1' },
-			y: { value: location[1] + 10 - entity.image.height / 2, duration: 250, ease: 'Power1' }
-		};
+		game.grid.setCellContent(newCoords, entity);
 		
-		if (! dontUseTimeline && entity.timeline) {
-			entity.timeline.add(tween);
-		} else {
-			game.scene.tweens.add(tween);
+		if ( ! game.gameSettings.isHeadless) {
+			entity.image.setDepth(game.grid.processDepth(newCoords) + 1000);
+
+			// Process new location
+			var location = game.grid.coordinatesToLocation (newCoords);
+			
+			var tween = {
+				targets: entity.image,
+				x: { value: location[0], duration: 250, ease: 'Power1' },
+				y: { value: location[1] + 10 - entity.image.height / 2, duration: 250, ease: 'Power1' }
+			};
+			
+			if (! dontUseTimeline && entity.timeline) {
+				entity.timeline.add(tween);
+			} else {
+				game.scene.tweens.add(tween);
+			}
 		}
     }
 	
@@ -803,22 +833,26 @@ class Game {
 		if (this.flames.length == 0) {
 			// Victory
 			this.isGameOver = true;
-			this.scene.gameStateText1.setText('Victoire !');
-			this.scene.gameStateText2.setText(['Pour recommencer', 'cliquez ici', 'ou appuyez sur R']);
-			this.scene.gameStateText1.setInteractive();
-			this.scene.gameStateText2.setInteractive();
-			
-			// Update stats
-			localStorage.setItem('nbVictories', (parseInt(localStorage.getItem('nbVictories')) || 0) + 1);
+			if (! this.gameSettings.isHeadless) {
+				this.scene.gameStateText1.setText('Victoire !');
+				this.scene.gameStateText2.setText(['Pour recommencer', 'cliquez ici', 'ou appuyez sur R']);
+				this.scene.gameStateText1.setInteractive();
+				this.scene.gameStateText2.setInteractive();
+				
+				// Update stats
+				localStorage.setItem('nbVictories', (parseInt(localStorage.getItem('nbVictories')) || 0) + 1);
+			}
 		}
 	}
 	
 	gameOver () {
 		this.isGameOver = true;
-		this.scene.gameStateText1.setText('Game over !');
-		this.scene.gameStateText2.setText(['Pour recommencer', 'cliquez ici', 'ou appuyez sur R']);
-		this.scene.gameStateText1.setInteractive();
-		this.scene.gameStateText2.setInteractive();
+		if (! this.gameSettings.isHeadless) {
+			this.scene.gameStateText1.setText('Game over !');
+			this.scene.gameStateText2.setText(['Pour recommencer', 'cliquez ici', 'ou appuyez sur R']);
+			this.scene.gameStateText1.setInteractive();
+			this.scene.gameStateText2.setInteractive();
+		}
 	}
 	
 	findFlamesOnAdjacentCells(cell) {
@@ -888,18 +922,24 @@ class Game {
 					game.gameOver(game);
                 }
             }
-			if (adjacentFlames.length > 0) {
-				for (var flame of game.flames) {
-					var flameTimeline = flame.timeline;
-					if (flameTimeline && flameTimeline.totalData == 0) {
-						flameTimeline.add({targets: flame.image, x: flame.image.x, duration: 500});
+			
+			if (! game.gameSettings.isHeadless) {
+				if (adjacentFlames.length > 0) {
+					for (var flame of game.flames) {
+						var flameTimeline = flame.timeline;
+						if (flameTimeline && flameTimeline.totalData == 0) {
+							flameTimeline.add({targets: flame.image, x: flame.image.x, duration: 500});
+						}
 					}
 				}
 			}
-
+			
+			if (! game.gameSettings.isHeadless) {
+				destCell.content.image.destroy();
+			}
             game.removeFlame(destCell.content);
-			destCell.content.image.destroy();
             game.grid.setCellContent(destCell.coords, null);
+			
 
             game.nbKills++;
             game.character.health ++;
@@ -924,17 +964,38 @@ class Game {
                 }
             }
         }
-		
-		for (var flame of sortedFlames) {
-			var timeline = flame.timeline;
-			if (timeline) {
-				timeline.play();
-				flame.timeline = game.scene.tweens.createTimeline();
+		if (! game.gameSettings.isHeadless) {
+			for (var flame of sortedFlames) {
+				var timeline = flame.timeline;
+				if (timeline) {
+					timeline.play();
+					flame.timeline = game.scene.tweens.createTimeline();
+				}
 			}
 		}
         return true;
     }
 }
+
+var characterStartingData = {
+	'health': 40,
+	'ap': 10,
+	'baseAp': 10,
+	'startingCoords': new Coords(16, 14)
+};
+
+var gameSettings = {
+	'maxSpawnTurn': 6,
+	'spawnsPerTurn': 6,
+	'distanceToPlayerStartingPos': {'min': 4, 'max': 16}
+};
+
+var gridSettings = {
+	'mapWidth': 32,
+	'mapHeight': 31,
+	'tileWidthHalf': 20,
+	'tileHeightHalf': 12
+};
 
 class BolgrotScene extends Phaser.Scene {
     constructor () {
@@ -953,52 +1014,37 @@ class BolgrotScene extends Phaser.Scene {
     }
 
     create () {
-		var characterStartingData = {
-			'health': 40,
-			'ap': 10,
-			'baseAp': 10,
-			'startingCoords': new Coords(16, 14)
-		};
+		gridSettings.centerX = this.cameras.main.centerX;
+		gridSettings.centerY = this.cameras.main.centerY - gridSettings.tileHeightHalf * gridSettings.mapHeight - 50;
 		
-		var gameSettings = {
-			'maxSpawnTurn': 6,
-			'spawnsPerTurn': 6,
-			'distanceToPlayerStartingPos': {'min': 4, 'max': 16}
-		};
-		
-		var mapWidth = 32;
-		var mapHeight = 31;
-		var tileWidthHalf = 20;
-		var tileHeightHalf = 12;
-		var gridSettings = {
-			'mapWidth': mapWidth,
-			'mapHeight': mapHeight,
-			'centerX': this.cameras.main.centerX,
-			'centerY': this.cameras.main.centerY - tileHeightHalf * mapHeight - 50,
-			'tileWidthHalf': tileWidthHalf,
-			'tileHeightHalf': tileHeightHalf
-		};
-		
-		this.gameInstance = new Game(this, gameSettings, characterStartingData, gridSettings);
-		
-        this.characterInfoText = this.add.text(10, 10, '', { font: '16px Courier', fill: '#00ff00' });
-		
-        this.gameInfoText = this.add.text(250, 10, '', { font: '16px Courier', fill: '#00ff00' });
-        this.gameStateText1 = this.add.text(20, 10, 'Bolgrot', { font: '22px Courier', fill: '#ff0000' });
-        this.gameStateText2 = this.add.text(20, 40, ['Sorts : &, é, "', 'Fin de tour : F2', 'Recommencer : R'], { font: '16px Courier', fill: '#00ff00' });
-		
-		this.gameStateText1.on('pointerup', function () {
-			this.scene.restart();
-		}, this);
-		
-		this.gameStateText2.on('pointerup', function () {
-			this.scene.restart();
-		}, this);
+		setupGame(this, gameSettings, characterStartingData, gridSettings, false);
+    }
+}
 
-        this.gameInstance.spawnFlames(gameSettings.spawnsPerTurn);
+function setupGame(scene, gameSettings, characterStartingData, gridSettings, isHeadless) {
+	gameSettings.isHeadless = isHeadless;
+	
+	if (! isHeadless) {
+	
+		scene.characterInfoText = scene.add.text(10, 10, '', { font: '16px Courier', fill: '#00ff00' });
+		scene.gameInfoText = scene.add.text(250, 10, '', { font: '16px Courier', fill: '#00ff00' });
+		scene.gameStateText1 = scene.add.text(20, 10, 'Bolgrot', { font: '22px Courier', fill: '#ff0000' });
+		scene.gameStateText2 = scene.add.text(20, 40, ['Sorts : &, é, "', 'Fin de tour : F2', 'Recommencer : R'], { font: '16px Courier', fill: '#00ff00' });
+		
+		scene.gameStateText1.on('pointerup', function () {
+			scene.scene.restart();
+		}, scene);
+		
+		scene.gameStateText2.on('pointerup', function () {
+			scene.scene.restart();
+		}, scene);
+		
 		
 		localStorage.setItem('nbGamesPlayed', (parseInt(localStorage.getItem('nbGamesPlayed')) || 0) + 1);
-    }
+	}
+	
+	scene.gameInstance = new Game(scene, gameSettings, characterStartingData, gridSettings);
+	scene.gameInstance.spawnFlames(gameSettings.spawnsPerTurn);
 }
 
 const config = {
@@ -1008,6 +1054,9 @@ const config = {
     height: 600,
     scene: [ BolgrotScene ]
 };
+
+//var falseScene = {};
+//setupGame(falseScene, gameSettings, characterStartingData, gridSettings, true);
 
 const game = new Phaser.Game(config);
 
